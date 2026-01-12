@@ -37,6 +37,9 @@ class iRacingAPI:
         self.email = email
         self.password = password
         self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
         self.base_url = 'https://members-ng.iracing.com'
         self.authenticate()
     
@@ -47,9 +50,15 @@ class iRacingAPI:
         return hash_base64
     
     def authenticate(self):
+        # First, visit the login page to establish session
+        try:
+            print("Visiting login page...")
+            self.session.get('https://members-login.iracing.com/?ref=https://members-ng.iracing.com/data')
+        except:
+            pass
+        
         hashed_pw = self.hash_password(self.password, self.email)
         
-        # Try with form data instead of JSON
         auth_data = {
             'email': self.email,
             'password': hashed_pw
@@ -58,7 +67,10 @@ class iRacingAPI:
         try:
             response = self.session.post(
                 f'{self.base_url}/auth',
-                data=auth_data  # Changed from json=auth_data
+                data=auth_data,
+                headers={
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
             )
             
             print(f"Auth status: {response.status_code}")
@@ -67,7 +79,7 @@ class iRacingAPI:
                 print("✓ iRacing authentication successful!")
                 return True
             else:
-                print(f"Auth failed: {response.text[:200]}")
+                print(f"Auth failed: {response.text[:500]}")
                 return False
         except Exception as e:
             print(f"Auth error: {e}")
