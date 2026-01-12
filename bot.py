@@ -228,9 +228,7 @@ class RecordBot(discord.Client):
 if __name__ == "__main__":
     client = RecordBot()
     client.run(DISCORD_TOKEN)
-```
 
 **And `requirements.txt`:**
-```
 discord.py
 requests
