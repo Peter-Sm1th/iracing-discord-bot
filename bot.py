@@ -48,17 +48,21 @@ class iRacingAPI:
     
     def authenticate(self):
         hashed_pw = self.hash_password(self.password, self.email)
+        
+        # Try with form data instead of JSON
         auth_data = {
             'email': self.email,
             'password': hashed_pw
         }
+        
         try:
             response = self.session.post(
                 f'{self.base_url}/auth',
-                json=auth_data,
-                headers={'Content-Type': 'application/json'}
+                data=auth_data  # Changed from json=auth_data
             )
+            
             print(f"Auth status: {response.status_code}")
+            
             if response.status_code == 200:
                 print("✓ iRacing authentication successful!")
                 return True
