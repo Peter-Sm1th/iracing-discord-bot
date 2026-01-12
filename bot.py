@@ -1,101 +1,18 @@
 import discord
 from discord.ext import tasks
-import requests
 import json
-import asyncio
 from datetime import datetime
-import hashlib
-import base64
+from iracingdataapi.client import irDataClient
 
 # Configuration
 DISCORD_TOKEN = 'MTQ2MDM3MTMyODczMjIzMzk0MQ.GalAxr.QC2K2wHvjo4hSIqKGH6r21EqIR-6UxU0Be2SCs'
 CHANNEL_ID = 1460000687206175011
 IRACING_EMAIL = 'pjsmithdesigns@gmail.com'
 IRACING_PASSWORD = 'Blackracing33!'
-CUSTOMER_IDS = [1042800]  # Your and your friend's customer IDs
+CUSTOMER_IDS = [1042800]
 
 # Store last known records
 RECORDS_FILE = 'records.json'
-
-class iRacingAPI:
-    def __init__(self, email, password):
-        self.base_url = 'https://members-ng.iracing.com'
-        self.session = requests.Session()
-        self.authenticate(email, password)
-    
-    def authenticate(self, email, password):
-        """Authenticate with iRacing using their current API"""
-        auth_url = f'{self.base_url}/auth'
-        
-        # Encode password
-        encoded_password = base64.b64encode(
-            (password + email.lower()).encode('utf-8')
-        ).decode('utf-8')
-        
-        payload = {
-            'email': email,
-            'password': encoded_password
-        }
-        
-        try:
-            response = self.session.post(
-                auth_url,
-                data=payload,  # Changed from json to data
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
-            )
-            
-            print(f"Auth response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                print("Authentication successful!")
-                return True
-            else:
-                print(f"Auth response: {response.text[:500]}")
-                raise Exception(f'iRacing authentication failed with status {response.status_code}')
-        except Exception as e:
-            print(f"Authentication error: {str(e)}")
-            raise
-    
-    def get_last_series_results(self, customer_id):
-        """Get recent racing results for a customer"""
-        url = f'{self.base_url}/data/results/search_series'
-        params = {
-            'cust_id': customer_id,
-            'official_only': 0
-        }
-        
-        try:
-            response = self.session.get(url, params=params)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                print(f"Error getting results: {response.status_code}")
-                return None
-        except Exception as e:
-            print(f"Error in get_last_series_results: {str(e)}")
-            return None
-    
-    def get_best_lap_times(self, customer_id):
-        """Extract best lap times from recent results"""
-        results = self.get_last_series_results(customer_id)
-        if not results:
-            return None
-        
-        lap_times = []
-        
-        # Parse the results to extract lap time data
-        # Structure may vary - adjust based on actual API response
-        if 'data' in results:
-            for session in results['data']:
-                if 'best_lap_time' in session and session['best_lap_time'] > 0:
-                    lap_times.append({
-                        'track_name': session.get('track', {}).get('track_name', 'Unknown Track'),
-                        'car_name': session.get('car_name', 'Unknown Car'),
-                        'best_lap_time': session['best_lap_time'],
-                        'display_name': session.get('display_name', 'Unknown Driver')
-                    })
-        
-        return {'data': lap_times} if lap_times else None
 
 def load_records():
     try:
@@ -126,10 +43,17 @@ class RecordBot(discord.Client):
     async def on_ready(self):
         print(f'Logged in as {self.user}')
         try:
-            self.iracing = iRacingAPI(IRACING_EMAIL, IRACING_PASSWORD)
+            # Initialize iRacing data client
+            self.iracing = irDataClient(
+                username=IRACING_EMAIL,
+                password=IRACING_PASSWORD
+            )
+            print("iRacing authentication successful!")
             self.check_records.start()
         except Exception as e:
             print(f"Failed to initialize iRacing API: {e}")
+            import traceback
+            traceback.print_exc()
     
     @tasks.loop(minutes=15)
     async def check_records(self):
@@ -145,19 +69,31 @@ class RecordBot(discord.Client):
         for customer_id in CUSTOMER_IDS:
             try:
                 print(f"Checking customer {customer_id}")
-                data = self.iracing.get_best_lap_times(customer_id)
                 
-                if not data or 'data' not in data:
-                    print(f"No data for customer {customer_id}")
+                # Get member's recent races
+                member_recent = self.iracing.stats_member_recent_races(
+                    cust_id=customer_id
+                )
+                
+                if not member_recent or 'races' not in member_recent:
+                    print(f"No race data for customer {customer_id}")
                     continue
                 
-                for lap_data in data['data']:
-                    track_name = lap_data.get('track_name')
-                    car_name = lap_data.get('car_name')
-                    best_lap = lap_data.get('best_lap_time')
-                    driver_name = lap_data.get('display_name')
+                # Get member info for display name
+                member_info = self.iracing.stats_member_info(cust_id=customer_id)
+                driver_name = member_info.get('display_name', f'Driver {customer_id}')
+                
+                # Process each recent race
+                for race in member_recent['races']:
+                    track_name = race.get('track_name', 'Unknown Track')
+                    car_name = race.get('car_name', 'Unknown Car')
+                    best_lap = race.get('best_lap_time', 0)
                     
-                    if not all([track_name, car_name, best_lap, driver_name]) or best_lap <= 0:
+                    # Convert lap time from milliseconds to seconds if needed
+                    if best_lap > 1000:
+                        best_lap = best_lap / 10000.0
+                    
+                    if not all([track_name, car_name]) or best_lap <= 0:
                         continue
                     
                     # Server-wide record key (track + car)
@@ -171,13 +107,13 @@ class RecordBot(discord.Client):
                     if record_key not in current_records:
                         # First record for this track/car
                         is_new_record = True
-                        print(f"First record for {track_name} in {car_name}")
+                        print(f"First record for {track_name} in {car_name}: {best_lap}s")
                     elif best_lap < current_records[record_key]['time']:
                         # Beats existing record
                         is_new_record = True
                         previous_holder = current_records[record_key]['driver']
                         previous_time = current_records[record_key]['time']
-                        print(f"New record! {driver_name} beat {previous_holder}")
+                        print(f"New record! {driver_name} ({best_lap}s) beat {previous_holder} ({previous_time}s)")
                     
                     if is_new_record:
                         # Update the record
@@ -227,7 +163,12 @@ class RecordBot(discord.Client):
                 traceback.print_exc()
             
             # Be nice to iRacing API
-            await asyncio.sleep(2)
+            await self.wait_for(2)
+    
+    async def wait_for(self, seconds):
+        """Helper to wait asynchronously"""
+        import asyncio
+        await asyncio.sleep(seconds)
 
 # Run the bot
 if __name__ == "__main__":
