@@ -19,27 +19,47 @@ class iRacingAPI:
     def __init__(self, email, password):
         self.base_url = 'https://members-ng.iracing.com'
         self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
         self.authenticate(email, password)
     
     def authenticate(self, email, password):
+        # Try the authentication endpoint
         auth_url = f'{self.base_url}/auth'
-        payload = {
+        data = {
             'email': email,
             'password': password
         }
-        response = self.session.post(auth_url, json=payload)
-        if response.status_code != 200:
-            raise Exception('iRacing authentication failed')
+        
+        try:
+            response = self.session.post(auth_url, json=data)
+            print(f"Auth response status: {response.status_code}")
+            print(f"Auth response: {response.text[:200]}")  # Print first 200 chars for debugging
+            
+            if response.status_code == 200:
+                print("Authentication successful!")
+            else:
+                raise Exception(f'iRacing authentication failed with status {response.status_code}')
+        except Exception as e:
+            print(f"Authentication error: {str(e)}")
+            raise
     
     def get_best_lap_times(self, customer_id):
         # Get recent sessions and extract best laps
         url = f'{self.base_url}/data/results/search_series'
         params = {
-            'customer_id': customer_id,
-            'official_only': False  # Include practice sessions
+            'cust_id': customer_id,  # Changed from customer_id
+            'official_only': 0
         }
-        response = self.session.get(url, params=params)
-        return response.json() if response.status_code == 200 else None
+        
+        try:
+            response = self.session.get(url, params=params)
+            print(f"Lap times response status: {response.status_code}")
+            return response.json() if response.status_code == 200 else None
+        except Exception as e:
+            print(f"Error getting lap times: {str(e)}")
+            return None
 
 def load_records():
     try:
