@@ -6,11 +6,11 @@ from datetime import datetime
 import hashlib
 import base64
 
-DISCORD_TOKEN = 'your_discord_bot_token_here'
-CHANNEL_ID = 123456789
-IRACING_EMAIL = 'your_iracing_email'
-IRACING_PASSWORD = 'your_iracing_password'
-CUSTOMER_IDS = [123456]
+DISCORD_TOKEN = 'MTQ2MDM3MTMyODczMjIzMzk0MQ.GalAxr.QC2K2wHvjo4hSIqKGH6r21EqIR-6UxU0Be2SCs'
+CHANNEL_ID = 1460000687206175011
+IRACING_EMAIL = 'pjsmithdesigns@gmail.com'
+IRACING_PASSWORD = 'Blackracing33!'
+CUSTOMER_IDS = [1042800]
 
 RECORDS_FILE = 'records.json'
 
