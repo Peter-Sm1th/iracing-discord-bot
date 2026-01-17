@@ -4,6 +4,7 @@ import requests
 import json
 from datetime import datetime
 import base64
+import hashlib
 
 # Configuration
 DISCORD_TOKEN = 'MTQ2MDM3MTMyODczMjIzMzk0MQ.GalAxr.QC2K2wHvjo4hSIqKGH6r21EqIR-6UxU0Be2SCs'
@@ -12,7 +13,7 @@ IRACING_EMAIL = 'pjsmithdesigns@gmail.com'
 IRACING_PASSWORD = 'Blackracing33!'
 CLIENT_ID = '1042800-pwlimited'
 CLIENT_SECRET = 'LIKING-casually-occupancy-DETONATE-RINSING-GUTTER'
-CUSTOMER_IDS = [1042800]  # Just you for now
+CUSTOMER_IDS = [1042800]
 
 RECORDS_FILE = 'records.json'
 
@@ -34,6 +35,18 @@ def format_lap_time(seconds):
     secs = seconds % 60
     return f"{minutes}:{secs:06.3f}"
 
+def mask_secret(secret, identifier):
+    """
+    Mask a secret using iRacing's masking algorithm.
+    For client_secret: identifier is client_id
+    For password: identifier is username (email)
+    """
+    normalized_id = identifier.strip().lower()
+    combined = f"{secret}{normalized_id}"
+    hasher = hashlib.sha256()
+    hasher.update(combined.encode('utf-8'))
+    return base64.b64encode(hasher.digest()).decode('utf-8')
+
 class iRacingOAuth:
     def __init__(self, email, password, client_id, client_secret):
         self.email = email
@@ -42,7 +55,7 @@ class iRacingOAuth:
         self.client_secret = client_secret
         self.session = requests.Session()
         self.base_url = 'https://members-ng.iracing.com'
-        self.oauth_url = 'https://oauth.iracing.com'
+        self.oauth_url = 'https://oauth.iracing.com/oauth2'
         self.access_token = None
         self.refresh_token = None
         self.token_expiry = None
@@ -50,19 +63,22 @@ class iRacingOAuth:
     
     def authenticate(self):
         """Get initial access token using Password Limited flow"""
-        auth_string = f"{self.client_id}:{self.client_secret}"
-        auth_bytes = auth_string.encode('utf-8')
-        auth_b64 = base64.b64encode(auth_bytes).decode('utf-8')
+        # Mask the client secret with client_id
+        masked_secret = mask_secret(self.client_secret, self.client_id)
+        
+        # Mask the password with username
+        masked_password = mask_secret(self.password, self.email)
         
         headers = {
-            'Authorization': f'Basic {auth_b64}',
             'Content-Type': 'application/x-www-form-urlencoded'
         }
         
         data = {
             'grant_type': 'password_limited',
+            'client_id': self.client_id,
+            'client_secret': masked_secret,
             'username': self.email,
-            'password': self.password,
+            'password': masked_password,
             'scope': 'iracing'
         }
         
@@ -79,9 +95,10 @@ class iRacingOAuth:
             if response.status_code == 200:
                 token_data = response.json()
                 self.access_token = token_data['access_token']
-                self.refresh_token = token_data['refresh_token']
+                self.refresh_token = token_data.get('refresh_token')
                 self.token_expiry = datetime.now().timestamp() + token_data.get('expires_in', 600)
                 print("✓ OAuth authentication successful!")
+                print(f"  Token expires in: {token_data.get('expires_in')} seconds")
                 return True
             else:
                 print(f"OAuth failed: {response.text[:500]}")
@@ -94,21 +111,26 @@ class iRacingOAuth:
     
     def refresh_access_token(self):
         """Refresh the access token when it expires"""
-        auth_string = f"{self.client_id}:{self.client_secret}"
-        auth_bytes = auth_string.encode('utf-8')
-        auth_b64 = base64.b64encode(auth_bytes).decode('utf-8')
+        if not self.refresh_token:
+            print("No refresh token available, re-authenticating...")
+            return self.authenticate()
+        
+        # Mask the client secret
+        masked_secret = mask_secret(self.client_secret, self.client_id)
         
         headers = {
-            'Authorization': f'Basic {auth_b64}',
             'Content-Type': 'application/x-www-form-urlencoded'
         }
         
         data = {
             'grant_type': 'refresh_token',
+            'client_id': self.client_id,
+            'client_secret': masked_secret,
             'refresh_token': self.refresh_token
         }
         
         try:
+            print("Refreshing access token...")
             response = requests.post(
                 f'{self.oauth_url}/token',
                 headers=headers,
@@ -118,16 +140,16 @@ class iRacingOAuth:
             if response.status_code == 200:
                 token_data = response.json()
                 self.access_token = token_data['access_token']
-                self.refresh_token = token_data['refresh_token']
+                self.refresh_token = token_data.get('refresh_token')
                 self.token_expiry = datetime.now().timestamp() + token_data.get('expires_in', 600)
                 print("✓ Token refreshed")
                 return True
             else:
                 print(f"Token refresh failed: {response.text[:200]}")
-                return False
+                return self.authenticate()
         except Exception as e:
             print(f"Token refresh error: {e}")
-            return False
+            return self.authenticate()
     
     def ensure_valid_token(self):
         """Check if token is valid, refresh if needed"""
@@ -226,14 +248,13 @@ class RecordBot(discord.Client):
                 # Get driver name from first race
                 driver_name = races[0].get('display_name', f'Driver {customer_id}') if races else f'Driver {customer_id}'
                 
-                for race in races[:10]:  # Check last 10 races
+                for race in races[:10]:
                     track_name = race.get('track', {}).get('track_name', 'Unknown Track')
                     car_name = race.get('series_name', f"Series {race.get('series_id', 'Unknown')}")
                     
                     # Get qualifying time (best lap)
                     lap_time = race.get('qualifying_time', 0)
                     
-                    # Skip if no valid lap time
                     if lap_time <= 0:
                         continue
                     
@@ -243,7 +264,6 @@ class RecordBot(discord.Client):
                     
                     record_key = f"{track_name}_{car_name}"
                     
-                    # Check for new record
                     is_new = False
                     prev_holder = None
                     prev_time = None
@@ -265,7 +285,6 @@ class RecordBot(discord.Client):
                             'date': datetime.now().isoformat()
                         }
                         
-                        # Post to Discord
                         embed = discord.Embed(
                             title="🏁 NEW SERVER RECORD! 🏁",
                             description=f"**{driver_name}** just set a blistering lap!",
