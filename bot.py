@@ -79,7 +79,7 @@ class iRacingOAuth:
             'client_secret': masked_secret,
             'username': self.email,
             'password': masked_password,
-            'scope': 'iracing'
+            'scope': 'iracing.auth'
         }
         
         try:
