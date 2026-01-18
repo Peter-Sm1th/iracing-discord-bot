@@ -252,67 +252,85 @@ class RecordBot(discord.Client):
                     track_name = race.get('track', {}).get('track_name', 'Unknown Track')
                     car_name = race.get('series_name', f"Series {race.get('series_id', 'Unknown')}")
                     
-                    # Get qualifying time (best lap)
-                    lap_time = race.get('qualifying_time', 0)
-                    
-                    if lap_time <= 0:
-                        continue
+                    # Check both qualifying AND race best lap times
+                    qualifying_time = race.get('qualifying_time', 0)
+                    race_best_lap = race.get('best_lap_time', 0)
                     
                     # Convert from centiseconds if needed
-                    if lap_time > 10000:
-                        lap_time = lap_time / 10000.0
+                    if qualifying_time > 10000:
+                        qualifying_time = qualifying_time / 10000.0
+                    if race_best_lap > 10000:
+                        race_best_lap = race_best_lap / 10000.0
                     
-                    record_key = f"{track_name}_{car_name}"
+                    # Collect all valid lap times
+                    lap_times_to_check = []
+                    if qualifying_time > 0:
+                        lap_times_to_check.append(('Qualifying', qualifying_time))
+                    if race_best_lap > 0:
+                        lap_times_to_check.append(('Race', race_best_lap))
                     
-                    is_new = False
-                    prev_holder = None
-                    prev_time = None
+                    if not lap_times_to_check:
+                        continue
                     
-                    if record_key not in current_records:
-                        is_new = True
-                        print(f"  ✓ First record: {track_name} / {car_name} - {format_lap_time(lap_time)}")
-                    elif lap_time < current_records[record_key]['time']:
-                        is_new = True
-                        prev_holder = current_records[record_key]['driver']
-                        prev_time = current_records[record_key]['time']
-                        print(f"  ✓ New record: beat previous by {prev_time - lap_time:.3f}s")
-                    
-                    if is_new:
-                        current_records[record_key] = {
-                            'time': lap_time,
-                            'driver': driver_name,
-                            'customer_id': customer_id,
-                            'date': datetime.now().isoformat()
-                        }
+                    # Check each lap type
+                    for lap_type, lap_time in lap_times_to_check:
+                        record_key = f"{track_name}_{car_name}"
                         
-                        embed = discord.Embed(
-                            title="🏁 NEW SERVER RECORD! 🏁",
-                            description=f"**{driver_name}** just set a blistering lap!",
-                            color=0xFF1493,
-                            timestamp=datetime.now()
-                        )
+                        is_new = False
+                        prev_holder = None
+                        prev_time = None
                         
-                        embed.add_field(name="🛣️ Track", value=track_name, inline=True)
-                        embed.add_field(name="🏎️ Series", value=car_name, inline=True)
-                        embed.add_field(name="⏱️ Time", value=format_lap_time(lap_time), inline=True)
+                        if record_key not in current_records:
+                            is_new = True
+                            print(f"  ✓ First record: {track_name} / {car_name} ({lap_type}) - {format_lap_time(lap_time)}")
+                        elif lap_time < current_records[record_key]['time']:
+                            is_new = True
+                            prev_holder = current_records[record_key]['driver']
+                            prev_time = current_records[record_key]['time']
+                            print(f"  ✓ New record ({lap_type}): beat previous by {prev_time - lap_time:.3f}s")
                         
-                        if prev_holder:
-                            improvement = prev_time - lap_time
-                            embed.add_field(
-                                name="📊 Previous Record",
-                                value=f"{prev_holder}: {format_lap_time(prev_time)}",
-                                inline=False
+                        if is_new:
+                            current_records[record_key] = {
+                                'time': lap_time,
+                                'driver': driver_name,
+                                'customer_id': customer_id,
+                                'date': datetime.now().isoformat(),
+                                'type': lap_type
+                            }
+                            
+                            # Post to Discord
+                            embed = discord.Embed(
+                                title="🏁 NEW SERVER RECORD! 🏁",
+                                description=f"**{driver_name}** just set a blistering lap in **{lap_type}**!",
+                                color=0xFF1493,
+                                timestamp=datetime.now()
                             )
-                            embed.add_field(
-                                name="🔥 Improvement",
-                                value=f"-{improvement:.3f}s",
-                                inline=False
-                            )
-                        
-                        embed.set_footer(text="After Hours Racing League")
-                        
-                        await channel.send(embed=embed)
-                        print(f"  ✓ Posted to Discord!")
+                            
+                            embed.add_field(name="🛣️ Track", value=track_name, inline=True)
+                            embed.add_field(name="🏎️ Series", value=car_name, inline=True)
+                            embed.add_field(name="⏱️ Time", value=format_lap_time(lap_time), inline=True)
+                            embed.add_field(name="📋 Session", value=lap_type, inline=True)
+                            
+                            if prev_holder:
+                                improvement = prev_time - lap_time
+                                embed.add_field(
+                                    name="📊 Previous Record",
+                                    value=f"{prev_holder}: {format_lap_time(prev_time)}",
+                                    inline=False
+                                )
+                                embed.add_field(
+                                    name="🔥 Improvement",
+                                    value=f"-{improvement:.3f}s",
+                                    inline=False
+                                )
+                            
+                            embed.set_footer(text="After Hours Racing League")
+                            
+                            await channel.send(embed=embed)
+                            print(f"  ✓ Posted to Discord!")
+                            
+                            # Only keep the fastest time for this track/car combo
+                            break
                 
                 save_records(current_records)
                 
