@@ -458,11 +458,21 @@ class RecordBot(discord.Client):
             config_name = track_info.get('config_name', '')
             car_name = last_session.get('car_name', last_session.get('series_name', 'Unknown Car'))
             
-            # Build search query - prioritize track+config for specific track guides
-            # Format: "iracing [track] [config] track guide"
-            search_parts = ['iracing', track_name]
+            # Build search query - car + track + config specific
+            # Format: "iracing [car] [track] [config] track guide"
+            search_parts = ['iracing']
+            
+            # Add car name (clean up if it's a series name)
+            if car_name and car_name != 'Unknown Car':
+                # Clean up common series suffixes to get just the car name
+                clean_car = car_name.replace(' - Fixed', '').replace(' Series', '').strip()
+                search_parts.append(clean_car)
+            
+            # Add track and config
+            search_parts.append(track_name)
             if config_name:
                 search_parts.append(config_name)
+            
             search_parts.append('track guide')
             
             search_query = ' '.join(search_parts)
@@ -516,7 +526,7 @@ class RecordBot(discord.Client):
             
             embed = discord.Embed(
                 title="🏁 Track Guides Found",
-                description=f"**{full_track}**\n**Car from last session:** {car_name}\n\nTop 3 most relevant guides:",
+                description=f"**{full_track}**\n**{car_name}**\n\nTop 3 most relevant guides:",
                 color=discord.Color.blue()
             )
             
