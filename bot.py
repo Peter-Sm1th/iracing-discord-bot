@@ -286,6 +286,10 @@ class RecordBot(discord.Client):
                 # Get the most recent race
                 last_race = races[0]
                 
+                # Debug: Print all available keys
+                print(f"Available race data keys: {last_race.keys()}")
+                print(f"Full race data sample: {json.dumps(last_race, indent=2)[:1000]}")
+                
                 # Extract race details
                 driver_name = last_race.get('display_name', f'Driver {customer_id}')
                 series_name = last_race.get('series_name', 'Unknown Series')
@@ -298,9 +302,9 @@ class RecordBot(discord.Client):
                 if config_name and config_name != track_name:
                     full_track_name += f" - {config_name}"
                 
-                # Position data
-                start_position = last_race.get('starting_position', 'N/A')
-                finish_position = last_race.get('finish_position', 'N/A')
+                # Position data (try multiple field names)
+                start_position = last_race.get('starting_position') or last_race.get('start_position') or last_race.get('starting_position_in_class') or 'N/A'
+                finish_position = last_race.get('finish_position') or last_race.get('finish_position_in_class') or 'N/A'
                 
                 # Calculate position change
                 position_change = ""
@@ -313,17 +317,17 @@ class RecordBot(discord.Client):
                     else:
                         position_change = " →"
                 
-                # Lap data
-                laps_complete = last_race.get('laps_complete', 0)
-                laps_lead = last_race.get('laps_lead', 0)
+                # Lap data (try multiple field names)
+                laps_complete = last_race.get('laps_complete') or last_race.get('laps') or last_race.get('nlaps') or 0
+                laps_lead = last_race.get('laps_lead') or last_race.get('laps_led') or 0
                 
-                # Average lap time (convert from centiseconds)
-                avg_lap_time = last_race.get('average_lap', 0)
+                # Average lap time (convert from centiseconds, try multiple field names)
+                avg_lap_time = last_race.get('average_lap') or last_race.get('avg_lap_time') or last_race.get('average_lap_time') or 0
                 if avg_lap_time > 10000:
                     avg_lap_time = avg_lap_time / 10000.0
                 
-                # Best lap time
-                best_lap_time = last_race.get('best_lap_time', 0)
+                # Best lap time (try multiple field names)
+                best_lap_time = last_race.get('best_lap_time') or last_race.get('best_laptime') or last_race.get('bestlaptime') or 0
                 if best_lap_time > 10000:
                     best_lap_time = best_lap_time / 10000.0
                 
