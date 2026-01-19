@@ -458,17 +458,21 @@ class RecordBot(discord.Client):
             config_name = track_info.get('config_name', '')
             car_name = last_session.get('car_name', last_session.get('series_name', 'Unknown Car'))
             
-            # Build search query
-            search_parts = ['iracing', 'track guide', track_name]
+            # Build search query - prioritize track+config for specific track guides
+            # Format: "iracing [track] [config] track guide"
+            search_parts = ['iracing', track_name]
             if config_name:
                 search_parts.append(config_name)
-            # Only add car name if it's not too long (avoid overly specific searches)
-            if len(car_name) < 30:
-                search_parts.append(car_name)
+            search_parts.append('track guide')
             
             search_query = ' '.join(search_parts)
             
             await message.channel.send(f"🔍 Searching YouTube for: `{search_query}`")
+            
+            # Add car name to description for context, but not in search
+            search_description = f"{track_name}"
+            if config_name:
+                search_description = f"{track_name} - {config_name}"
             
             # Search YouTube
             youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
@@ -479,43 +483,53 @@ class RecordBot(discord.Client):
             search_response = youtube.search().list(
                 q=search_query,
                 part='id,snippet',
-                maxResults=5,
-                order='viewCount',
+                maxResults=10,
+                order='relevance',  # Changed from viewCount to relevance for better track-specific results
                 type='video',
                 publishedAfter=one_year_ago,
                 relevanceLanguage='en'
             ).execute()
             
             if not search_response.get('items'):
-                await message.channel.send(f"❌ No track guides found for **{track_name}** with **{car_name}**")
+                await message.channel.send(f"❌ No track guides found for **{track_name}**")
                 return
             
-            # Get the top video
-            top_video = search_response['items'][0]
-            video_id = top_video['id']['videoId']
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            video_title = top_video['snippet']['title']
-            channel = top_video['snippet']['channelTitle']
+            # Get top 3 videos
+            top_videos = search_response['items'][:3]
             
-            # Get view count
+            # Get video IDs for batch stats request
+            video_ids = [video['id']['videoId'] for video in top_videos]
+            
+            # Get view counts for all videos in one API call
             video_stats = youtube.videos().list(
                 part='statistics',
-                id=video_id
+                id=','.join(video_ids)
             ).execute()
             
-            view_count = int(video_stats['items'][0]['statistics']['viewCount'])
+            # Create a map of video_id to view count
+            view_counts = {}
+            for stat in video_stats['items']:
+                view_counts[stat['id']] = int(stat['statistics']['viewCount'])
             
             # Create embed
             full_track = f"{track_name} - {config_name}" if config_name else track_name
             
             embed = discord.Embed(
-                title="🏁 Track Guide Found",
-                description=f"**{full_track}**\n**Car:** {car_name}",
+                title="🏁 Track Guides Found",
+                description=f"**{full_track}**\n**Car from last session:** {car_name}\n\nTop 3 most relevant guides:",
                 color=discord.Color.blue()
             )
-            embed.add_field(name="📺 Video", value=f"[{video_title}]({video_url})", inline=False)
-            embed.add_field(name="👁️ Views", value=f"{view_count:,}", inline=True)
-            embed.add_field(name="📢 Channel", value=channel, inline=True)
+            
+            # Add each video as a field
+            for i, video in enumerate(top_videos, 1):
+                video_id = video['id']['videoId']
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                video_title = video['snippet']['title']
+                channel = video['snippet']['channelTitle']
+                views = view_counts.get(video_id, 0)
+                
+                field_value = f"[{video_title}]({video_url})\n📢 {channel} • 👁️ {views:,} views"
+                embed.add_field(name=f"#{i}", value=field_value, inline=False)
             
             embed.set_footer(text="Based on your last iRacing session")
             
