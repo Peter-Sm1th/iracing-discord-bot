@@ -189,6 +189,67 @@ class iRacingOAuth:
             import traceback
             traceback.print_exc()
             return None
+    
+    def get_subsession_results(self, subsession_id):
+        """Get detailed results for a specific subsession including lap times"""
+        if not self.ensure_valid_token():
+            return None
+        
+        try:
+            url = f'{self.base_url}/data/results/get'
+            params = {'subsession_id': subsession_id}
+            headers = {
+                'Authorization': f'Bearer {self.access_token}'
+            }
+            
+            response = requests.get(url, params=params, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Check if it's a link response
+                if 'link' in data:
+                    link_response = requests.get(data['link'])
+                    if link_response.status_code == 200:
+                        return link_response.json()
+                return data
+            else:
+                print(f"Subsession API call failed: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Error getting subsession: {e}")
+            return None
+    
+    def get_member_info(self, customer_ids):
+        """Get member information including display name"""
+        if not self.ensure_valid_token():
+            return None
+        
+        try:
+            url = f'{self.base_url}/data/member/get'
+            # Convert list to comma-separated string
+            if isinstance(customer_ids, list):
+                customer_ids = ','.join(map(str, customer_ids))
+            
+            params = {'cust_ids': customer_ids}
+            headers = {
+                'Authorization': f'Bearer {self.access_token}'
+            }
+            
+            response = requests.get(url, params=params, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'link' in data:
+                    link_response = requests.get(data['link'])
+                    if link_response.status_code == 200:
+                        return link_response.json()
+                return data
+            else:
+                print(f"Member info API call failed: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Error getting member info: {e}")
+            return None
 
 class RecordBot(discord.Client):
     def __init__(self):
@@ -265,6 +326,13 @@ class RecordBot(discord.Client):
         try:
             # Show typing indicator
             async with message.channel.typing():
+                # Get member info first to get display name
+                member_info = self.iracing.get_member_info([customer_id])
+                if member_info and 'members' in member_info and len(member_info['members']) > 0:
+                    driver_name = member_info['members'][0].get('display_name', f'Driver {customer_id}')
+                else:
+                    driver_name = f'Driver {customer_id}'
+                
                 # Get recent races
                 data = self.iracing.get_member_recent_races(customer_id)
                 
@@ -285,13 +353,31 @@ class RecordBot(discord.Client):
                 
                 # Get the most recent race
                 last_race = races[0]
+                subsession_id = last_race.get('subsession_id')
                 
-                # Debug: Print all available keys
-                print(f"Available race data keys: {last_race.keys()}")
-                print(f"Full race data sample: {json.dumps(last_race, indent=2)[:1000]}")
+                # Get detailed subsession data for lap times
+                subsession_data = None
+                avg_lap_time = 0
+                best_lap_time = 0
+                
+                if subsession_id:
+                    subsession_data = self.iracing.get_subsession_results(subsession_id)
+                    if subsession_data and 'session_results' in subsession_data:
+                        # Find this driver's results in the subsession
+                        for session in subsession_data['session_results']:
+                            if session.get('simsession_type') == 6:  # Race session
+                                for result in session.get('results', []):
+                                    if result.get('cust_id') == customer_id:
+                                        avg_lap_time = result.get('average_lap', 0)
+                                        best_lap_time = result.get('best_lap_time', 0)
+                                        # Convert from centiseconds if needed
+                                        if avg_lap_time > 10000:
+                                            avg_lap_time = avg_lap_time / 10000.0
+                                        if best_lap_time > 10000:
+                                            best_lap_time = best_lap_time / 10000.0
+                                        break
                 
                 # Extract race details
-                driver_name = last_race.get('display_name', f'Driver {customer_id}')
                 series_name = last_race.get('series_name', 'Unknown Series')
                 track_info = last_race.get('track', {})
                 track_name = track_info.get('track_name', 'Unknown Track')
@@ -302,9 +388,9 @@ class RecordBot(discord.Client):
                 if config_name and config_name != track_name:
                     full_track_name += f" - {config_name}"
                 
-                # Position data (try multiple field names)
-                start_position = last_race.get('starting_position') or last_race.get('start_position') or last_race.get('starting_position_in_class') or 'N/A'
-                finish_position = last_race.get('finish_position') or last_race.get('finish_position_in_class') or 'N/A'
+                # Position data (use correct field names from API)
+                start_position = last_race.get('start_position', 'N/A')
+                finish_position = last_race.get('finish_position', 'N/A')
                 
                 # Calculate position change
                 position_change = ""
@@ -317,19 +403,9 @@ class RecordBot(discord.Client):
                     else:
                         position_change = " →"
                 
-                # Lap data (try multiple field names)
-                laps_complete = last_race.get('laps_complete') or last_race.get('laps') or last_race.get('nlaps') or 0
-                laps_lead = last_race.get('laps_lead') or last_race.get('laps_led') or 0
-                
-                # Average lap time (convert from centiseconds, try multiple field names)
-                avg_lap_time = last_race.get('average_lap') or last_race.get('avg_lap_time') or last_race.get('average_lap_time') or 0
-                if avg_lap_time > 10000:
-                    avg_lap_time = avg_lap_time / 10000.0
-                
-                # Best lap time (try multiple field names)
-                best_lap_time = last_race.get('best_lap_time') or last_race.get('best_laptime') or last_race.get('bestlaptime') or 0
-                if best_lap_time > 10000:
-                    best_lap_time = best_lap_time / 10000.0
+                # Lap data (use correct field names)
+                laps_complete = last_race.get('laps', 0)
+                laps_lead = last_race.get('laps_led', 0)
                 
                 # Rating changes
                 old_irating = last_race.get('oldi_rating', 0)
@@ -377,12 +453,12 @@ class RecordBot(discord.Client):
                 # Lap times
                 embed.add_field(
                     name="⏱️ Average Lap", 
-                    value=format_lap_time(avg_lap_time), 
+                    value=format_lap_time(avg_lap_time) if avg_lap_time > 0 else "N/A", 
                     inline=True
                 )
                 embed.add_field(
                     name="🚀 Best Lap", 
-                    value=format_lap_time(best_lap_time), 
+                    value=format_lap_time(best_lap_time) if best_lap_time > 0 else "N/A", 
                     inline=True
                 )
                 embed.add_field(
