@@ -1,2 +1,5 @@
 discord.py
 requests
+iracingdataapi
+python-dotenv
+google-api-python-client
